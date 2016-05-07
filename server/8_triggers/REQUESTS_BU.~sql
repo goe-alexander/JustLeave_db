@@ -1,0 +1,63 @@
+select *from requests;
+/*To Do:
+  1. validate acc_id to be only ids found in app_users
+  2. validate type of status
+  3. validate dept id
+  4. 
+*/
+
+create or replace trigger REQUESTS_BU
+  BEFORE UPDATE on REQUESTS for each row
+  
+DECLARE
+  errMsg varchar2(255);
+  no_such_user EXCEPTION;
+
+  -- cursor that checks wether
+  cursor c_res_rej_user(puser varchar2) is
+    select 1 from app_users au
+      join employees emp on au.emp_id = emp.emp_id
+      where au.active = 'D'
+        and au.code = upper(puser)
+        and emp.trial_period = 'N';
+  crr c_res_rej_user%rowtype;
+
+  cursor c_req_type(preq_type varchar2) is
+    select 1 from request_types rt
+      where rt.req_code = preq_type
+        and rt.active = 'D';
+        
+  FUNCTION sanitize_user(puser varchar2) return varchar2 as
+
+    result requests.res_user%type;
+  BEGIN
+    result := upper(trim(puser));
+    return result;
+  end;
+
+        
+BEGIN
+  if :new.res_user != :old.res_user then
+    open c_res_rej_user(:new.res_user);
+    fetch c_res_rej_user into crr;
+    if c_res_rej_user%found then
+      :new.res_user := sanitize_user(:new.res_user);
+    else
+       raise no_such_user;
+    end if;   
+  end if;
+EXCEPTION
+  when no_such_user then
+    raise_application_error(-20155, 'No such user resolved ');
+  when others then
+    errMsg := substr(sqlerrm, 1, 500);
+    raise_application_error(-20150, errMsg);
+END;
+
+
+declare
+
+begin
+  emp_details.get_emp_details  
+
+end;
