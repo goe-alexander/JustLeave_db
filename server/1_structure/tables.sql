@@ -21,10 +21,11 @@ create table user_credentials(
 ); 
 
 create table user_atributions(
-  user_id number(10),
+  emp_id number(10),
   role_id number(10),
-  foreign key (user_id) references app_users(id),
-  foreign key (role_id) references role_types(role_id)
+  foreign key (emp_id) references employees(emp_id),
+  foreign key (role_id) references role_types(role_id),
+  constraint pk primary key (emp_id, role_id) 
 );
 
 create table role_types(
@@ -32,6 +33,7 @@ create table role_types(
   role_code varchar2(30),
   role_description varchar2(60),
   active varchar2(1) default 'D',
+  priority number
   constraint pk_rol_id primary key (role_Id) ,
   constraint chck_is_actv check (active in ('D', 'N')) 
   
@@ -62,15 +64,17 @@ create table requests(
   val_date date,
   val_user varchar2(30),
   Resolved varchar(1) default 'N',
-  res_user varchar2(30),
+  res_user number,
   rejected varchar2(1) default 'N',
-  rejected_user varchar2(30),
+  rejected_user number,
   is_retroactive varchar2(1) default 'N', 
   constraint req_id_pk primary key (id),
   constraint status_req_fk foreign key(type_of_req) references REQUEST_TYPES(REQ_CODE),
-  constraint chk_validated_value check(validated in ('D', 'N'),
-  constraint chk_reseolved_value check(validated in ('D', 'N'),
-  constraint chk_rejected_value check(validated in ('D', 'N'),
+  constraint res_usr_fk foreign key(res_user) references app_users(id),
+  constraint rej_usr_fk foreign key(rejected_user) references app_users(id),
+  constraint chk_validated_value check(validated in ('D', 'N')),
+  constraint chk_reseolved_value check(validated in ('D', 'N')),
+  constraint chk_rejected_value check(validated in ('D', 'N')),
 );
 
 
@@ -79,7 +83,9 @@ create table requests(
 create table status_types(
   stat_code varchar2(60) primary key,
   description varchar2(30),
-  active varchar2(1)
+  active varchar2(1),
+  final varchar2(1),
+  constraint chk_final_value check(final in ('D', 'N'))
 );
 
 

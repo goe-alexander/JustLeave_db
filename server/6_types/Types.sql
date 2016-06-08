@@ -1,9 +1,11 @@
 -- below we have the necessary types for the webapp to use and 
 create or replace type overlap_day as object(
   day_overlapped number,
-  month_of_day number
+  month_of_day varchar2(30)
   
 );
+create type col_overlapped_days is table of overlap_day;
+
 
 create type emp_details_type as object(
   acc_id number,

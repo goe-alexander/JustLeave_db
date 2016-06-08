@@ -3,23 +3,23 @@
   based on user role and start date of each vaction leave
 */
 create or replace package AC_req_actions as
-  type t_overlap_day is record(
-    day_overlapped number,
-    month_of_day varchar2(20)
-  );
-  type col_overlapped_days is table of t_overlap_day;
+
   function is_working_day(pdate date) return boolean;
-  procedure insert_request(p_l_type varchar, p_start_date varchar2, p_end_date varchar2, p_acc_id number, p_dept_id number, p_total_days number, p_out_msg out varchar2, p_id_req out number);
+  procedure insert_request(p_l_type varchar, p_start_date varchar2, p_end_date varchar2, p_acc_id number, p_dept_id number, p_total_days number, p_id_req out number);
   function num_days_in_interval(pst_date date, pend_Date date) return number;
   procedure delete_this_request(pid_req number, pacc_id number);
   procedure update_this_request(pid_req number, pacc_Id number, p_upd_stmt varchar2);
-  function pending_vacation_req(pacc_Id number, pdept_id number ) return boolean;
+  function pending_vacation_req(pacc_Id number, pdept_id number ) return number;
   -- used by web to call before inserting any request we have to validate there is no overlap
   function validate_period(p_st_date date, p_end_date date, pdpt_id number) return varchar2;
-  -- this function will return a special type that has the details of every request for a specified department.
-  --function calculate_available_actions();
-    function get_overlapped_days(p_st_date date, p_end_date date, p_dept_id number) return col_overlapped_days;
+  -- Functions that search for overlap with existing resolved requests or newly submitted ones and both
+   function get_all_overlapped_days(preq_id number) return col_overlapped_days;
+   function get_resolved_overlapped_days(preq_id number) return col_overlapped_days;
+   function get_submitted_overlapped_days(preq_id number) return col_overlapped_days;
+   -- function that calls the first overlapp function and then also checks to see if there is a 
+   /*function smart_resolve() return col_overlapped_days; */
 end AC_req_actions;
+
 create or replace package body AC_req_actions as
   function is_working_day(pdate date) return boolean as
     rez boolean;
@@ -125,16 +125,10 @@ create or replace package body AC_req_actions as
         raise_application_error(-20155, exm);
   end validate_period;
 
-  procedure insert_request(p_l_type varchar, p_start_date varchar2, p_end_date varchar2, p_acc_id number, p_dept_id number, p_total_days number, p_out_msg out varchar2, p_id_req out number) as
-    --pending_req boolean;
+  procedure insert_request(p_l_type varchar, p_start_date varchar2, p_end_date varchar2, p_acc_id number, p_dept_id number, p_total_days number, p_id_req out number) as
+    p_out_msg varchar2(255);
   begin
-    --pending_req := false;
-    /*  if this point is reached then all values have been calculated and that means the minimum requirements have been fullfilled
-      All that remains is to check wether there are no overlaps on the schedule.*/
     if p_l_type = 'VACATION_LEAVE'  then
-      /*The pending vacation leave requests option will be used at a later date*/
-      --pending_req := pending_vacation_req(p_acc_id, p_dept_id);
-      --  if it's a vacatin req and there is no overlap and no pending req then we insert a new request
         insert into requests
               (id,
                type_of_req,
@@ -167,10 +161,6 @@ create or replace package body AC_req_actions as
                 null,
                 'N');
         p_id_req := req_id_seq.currval;       
-/*      else
-        p_id_req := -1;
-        p_out_msg := 'You have pending Vacation requests that are unresolved';
-      end if;*/
     else
           insert into requests
               (id,
@@ -207,8 +197,9 @@ create or replace package body AC_req_actions as
     end if;
   exception
     when others then
-       p_id_req := -1;
+      rollback;
       p_out_msg := substr(sqlerrm, 1, 500);
+      raise_application_error(-20155, p_out_msg);
   end insert_request;
 
   procedure delete_this_request(pid_req number, pacc_id number) is
@@ -239,35 +230,31 @@ create or replace package body AC_req_actions as
       raise_application_error(-20157, 'Error in updating request: ' || errm);
   end;
 
-  function pending_vacation_req(pacc_Id number, pdept_id number) return boolean as
+  function pending_vacation_req(pacc_Id number, pdept_id number) return number as
 
-    /*This function will return true if there are any pending requests in their final stage so
-    that an employee may not make another vacation request. THis will be called from within the insert req procedure
-    ## */
-    -- we search for all unprocessed requests that are not retroactive and are from the year in question
+    /*Returns an info message saying there are other pending requests as well*/
+    -- we search for all unprocessed requests 
     cursor c_get_pend_vac_leave is
-      select 1
+      select count(*) "TOATE"
         from requests rq
-       where rq.status <> 'RESOLVED'
-         and rq.is_retroactive = 'N'
+       where exists (select 1 from status_types st where st.stat_code = rq.status and st.final = 'N')
          and rq.resolved = 'N'
          and rq.rejected = 'N'
          and rq.acc_id = pacc_Id
          and rq.dept_id = pdept_id
-         and rq.type_of_req = 'VACATION_LEAVE';
-    rez boolean;
+         and rq.type_of_req <> 'MEDICAL_LEAVE';
+    rez number;
   begin
-    rez := false;
     for x in c_get_pend_vac_leave loop
-      rez := true;
+      rez := x.TOATE;
     end loop;
     return rez;
   end;
   
-  
-  -- Function that checks all resolved requests for overlapped days. This will be called when manually resolving 
-  function get_overlapped_days(preq_id number) return col_overlapped_days as
-    od col_overlapped_days;
+  function get_submitted_overlapped_days(preq_id number) return col_overlapped_days as
+    od col_overlapped_days := col_overlapped_days();
+    od_distinct col_overlapped_days := col_overlapped_days();
+    
     currDate date;
     D number;
     Mnth varchar2(30);
@@ -277,21 +264,82 @@ create or replace package body AC_req_actions as
       select * from requests rq where rq.id = preq_id;
     gr getRequest%rowtype;  
   begin
+    Mnth := '';
     open getRequest;
     fetch getRequest into gr;
+    
     if getRequest%found then
-      od := col_overlapped_days();
-      for x in (select * from requests rq where rq.resolved = 'D' and rq.dept_id  = gr.dept_id and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
+      -- we go through all submitted requests(except the one in question) to see if it may overlap
+      for x in(select * from requests rq where rq.status = 'SUBMITTED' and rq.resolved != 'D' and rq.type_of_req != 'MEDICAL_LEAVE' and rq.id != preq_id  and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
+        dbms_output.put_line('found submitted');
         currDate := x.start_date;
         loop
           exit when currDate > x.end_date;
             if (is_working_day(currDate)) then
-              if(trunc(currDate) >= p_st_date and trunc(currDate) <= p_end_date) then
+              if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
                 D := to_number(extract(DAY from currDate));
-                Mnth := to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH');
+                Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
+                
                 od.extend;
-                od(od.last).day_overlapped := D;
-                od(od.last).month_of_day := Mnth;
+                od(od.last) := (overlap_day(D, Mnth));
+              end if;
+            else
+              currDate := currDate + 1;
+              continue;
+            end if;
+          currDate := currDate + 1;
+        end loop;            
+      end loop;
+    else 
+      raise REQ_NOT_FOUND;  
+    end if;
+    close getRequest;
+   --we go through the collection and get all distinct values so we don't repeat an overlapped day
+    -- in case of multiple overlaps
+    for x in (select distinct * from table(od) order by day_overlapped asc) loop
+      od_distinct.extend;
+      od_distinct(od_distinct.last) := (overlap_day(x.DAY_OVERLAPPED, x.MONTH_OF_DAY));
+    end loop;
+        
+    return od_distinct;
+  exception  
+    when REQ_NOT_FOUND then
+      raise_application_error(-20150, 'No such req found when checking for overlapps');
+    when others then   
+      errm := substr(sqlerrm, 1, 500);
+      raise_application_error(-20150, errm);
+  end;  
+  
+  function get_resolved_overlapped_days(preq_id number) return col_overlapped_days as
+    od col_overlapped_days := col_overlapped_days();
+    od_distinct col_overlapped_days := col_overlapped_days();
+    
+    currDate date;
+    D number;
+    Mnth varchar2(30);
+    REQ_NOT_FOUND EXCEPTION;
+    errm varchar2(255);
+    cursor getRequest is
+      select * from requests rq where rq.id = preq_id;
+    gr getRequest%rowtype;  
+  begin
+    Mnth := '';
+    open getRequest;
+    fetch getRequest into gr;
+    
+    if getRequest%found then
+      -- we go through all resolved requests to see if it may overlap
+      for x in (select * from requests rq where rq.resolved = 'D' and rq.status = 'RESOLVED' and rq.type_of_req != 'MEDICAL_LEAVE' and rq.dept_id  = gr.dept_id and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
+        dbms_output.put_line('found resolvedd');
+        currDate := x.start_date;
+        loop
+          exit when currDate > x.end_date;
+            if (is_working_day(currDate)) then
+              if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
+                D := to_number(extract(DAY from currDate));
+                Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
+                od.extend;
+                od(od.last) := (overlap_day(D, Mnth));
               end if;
             else
               currDate := currDate + 1;
@@ -303,10 +351,98 @@ create or replace package body AC_req_actions as
     else 
       raise REQ_NOT_FOUND;  
     end if;
-    return od;
+    close getRequest;
+    --we go through the collection and get all distinct values so we don't repeat an overlapped day
+    -- in case of multiple overlaps
+    for x in (select distinct * from table(od) order by day_overlapped asc) loop
+      od_distinct.extend;
+      od_distinct(od_distinct.last) := (overlap_day(x.DAY_OVERLAPPED, x.MONTH_OF_DAY));
+    end loop;
+    
+    return od_distinct;
   exception  
     when REQ_NOT_FOUND then
-      raise_application_error(-20150, "No such req found when checking for overlapps");
+      raise_application_error(-20150, 'No such req found when checking for overlapps');
+    when others then   
+      errm := substr(sqlerrm, 1, 500);
+      raise_application_error(-20150, errm);
+  end;  
+  
+  -- Function that checks all resolved and submitted requests for overlapped days. This will be called when manually resolving 
+  function get_all_overlapped_days(preq_id number) return col_overlapped_days as
+    od col_overlapped_days := col_overlapped_days();
+    od_distinct col_overlapped_days := col_overlapped_days();
+    
+    currDate date;
+    D number;
+    Mnth varchar2(30);
+    REQ_NOT_FOUND EXCEPTION;
+    errm varchar2(255);
+    cursor getRequest is
+      select * from requests rq where rq.id = preq_id;
+    gr getRequest%rowtype;  
+  begin
+    Mnth := '';
+    open getRequest;
+    fetch getRequest into gr;
+    
+    if getRequest%found then
+      -- we go through all resolved requests to see if it may overlap
+      for x in (select * from requests rq where rq.resolved = 'D' and rq.status = 'RESOLVED' and rq.type_of_req != 'MEDICAL_LEAVE'  and rq.dept_id  = gr.dept_id and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
+        dbms_output.put_line('found resolvedd');
+        currDate := x.start_date;
+        loop
+          exit when currDate > x.end_date;
+            if (is_working_day(currDate)) then
+              if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
+                D := to_number(extract(DAY from currDate));
+                Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
+                od.extend;
+                od(od.last) := (overlap_day(D, Mnth));
+              end if;
+            else
+              currDate := currDate + 1;
+              continue;
+            end if;
+          currDate := currDate + 1;
+        end loop;
+      end loop;
+      -- we go through all submitted requests(except the one in question) to see if it may overlap
+      for x in(select * from requests rq where rq.status = 'SUBMITTED' and rq.resolved != 'D' and rq.type_of_req != 'MEDICAL_LEAVE' and rq.id != preq_id  and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
+        dbms_output.put_line('found submitted');
+        currDate := x.start_date;
+        loop
+          exit when currDate > x.end_date;
+            if (is_working_day(currDate)) then
+              if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
+                D := to_number(extract(DAY from currDate));
+                Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
+                
+                od.extend;
+                od(od.last) := (overlap_day(D, Mnth));
+              end if;
+            else
+              currDate := currDate + 1;
+              continue;
+            end if;
+          currDate := currDate + 1;
+        end loop;            
+      end loop;
+    else 
+      raise REQ_NOT_FOUND;  
+    end if;
+    close getRequest;
+    --we go through the collection and get all distinct values so we don't repeat an overlapped day
+    -- in case of multiple overlaps
+    for x in (select distinct * from table(od) order by day_overlapped asc) loop
+      od_distinct.extend;
+      od_distinct(od_distinct.last) := (overlap_day(x.DAY_OVERLAPPED, x.MONTH_OF_DAY));
+    end loop;
+    
+    return od_distinct;
+  exception  
+    when REQ_NOT_FOUND then
+      raise_application_error(-20150, 'No such req found when checking for overlapps');
     when others then   
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20150, errm);

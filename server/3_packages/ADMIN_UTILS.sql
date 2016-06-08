@@ -1,14 +1,15 @@
 /*Package for creating a new user for an employee*/
 -- tables needed for creating a new user
 create or replace package ADMIN_UTILS as
+
   -- admin procedure for registering new accounts.
   procedure insert_new_employee(pf_name varchar2, pl_name varchar2, p_email varchar2, phire_date date, p_tm_id number, pdep_id number, ptrial_period varchar2, out_emp_id OUT number);
   function insert_new_employee(pf_name varchar2, pl_name varchar2, p_email varchar2, phire_date date, p_tm_id number, pdep_id number, ptrial_period boolean )  return number;
   function create_new_user(p_user_name varchar2, p_password varchar2, pemp_id number, p_department varchar2, ptm_id number) return number;
   
   -- when deleting an employee all app users tied to that account( which should be one ) need to also be removed 
-  procedure delete_empl(pid_empl varchar2);
-  procedure edit_empl(pemp_id number, pl_name varchar2, pf_name varchar2, pemail varchar2, phire_date date, pTm_ID number, pDep_id number;	
+   procedure delete_empl(pid_empl varchar2);
+   procedure edit_empl(pemp_id number, pf_name varchar2, pl_name varchar2, pemail varchar2, phire_date date, pTm_ID number, pDep_id number);
 end ADMIN_UTILS;
 
 create or replace package body ADMIN_UTILS as
@@ -16,7 +17,7 @@ create or replace package body ADMIN_UTILS as
   -- tables in question: app_users, user_attribtions, user_credentials 
   procedure delete_app_user(pid_app_user number,  pempl_id number) as
     cursor c_get_user is 
-      select apu.code, apu.id from app_users apu where apu.id = pid_app_user and apu.emp_id = pempl_id;
+      select apu.code, apu.id, apu.emp_id from app_users apu where apu.id = pid_app_user and apu.emp_id = pempl_id;
     
     
     errMsg varchar2(255);
@@ -25,7 +26,7 @@ create or replace package body ADMIN_UTILS as
     for x in c_get_user loop
       BEGIN
         delete user_credentials uc where uc.user_nm = x.code;
-        delete user_atributions ua where ua.user_id = x.id;
+        delete user_atributions ua where ua.emp_id = x.emp_id;
 
       EXCEPTION
         when others then
@@ -147,7 +148,6 @@ create or replace package body ADMIN_UTILS as
   end;
 
   function create_new_user(p_user_name varchar2, p_password varchar2, pemp_id number, p_department varchar2, ptm_id number) return number as
-
     cursor c_user_already_exits is 
       select 1 from app_users au 
         where au.code = p_user_name; 
