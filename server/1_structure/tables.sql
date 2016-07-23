@@ -55,26 +55,24 @@ create table requests(
   type_of_req varchar2(60),
   Status varchar2(60),
   submition_date date, 
-  Acc_id number, -- initiator
+  emp_id number, -- initiator
   dept_id number,
   start_date date,
   end_date date, 
   total_no_of_days number(10),
-  validated varchar2(1) default 'N',
-  val_date date,
-  val_user varchar2(30),
   Resolved varchar(1) default 'N',
   res_user number,
   rejected varchar2(1) default 'N',
   rejected_user number,
-  is_retroactive varchar2(1) default 'N', 
+  is_retroactive varchar2(1) default 'N',
+  under_review varchar2(1) default 'N', 
   constraint req_id_pk primary key (id),
   constraint status_req_fk foreign key(type_of_req) references REQUEST_TYPES(REQ_CODE),
-  constraint res_usr_fk foreign key(res_user) references app_users(id),
-  constraint rej_usr_fk foreign key(rejected_user) references app_users(id),
-  constraint chk_validated_value check(validated in ('D', 'N')),
-  constraint chk_reseolved_value check(validated in ('D', 'N')),
-  constraint chk_rejected_value check(validated in ('D', 'N')),
+  constraint res_usr_fk foreign key(res_user) references employees(emp_id),
+  constraint rej_usr_fk foreign key(rejected_user) references employees(emp_id),
+  constraint chk_resolved_value check(resolved in ('D', 'N')),
+  constraint chk_rejected_value check(rejected in ('D', 'N')),
+  constraint chk_under_review_value check(under_review in ('D', 'N')),
 );
 
 
@@ -211,3 +209,9 @@ create table sl_errors(
   constraint cor_err_pk primary key(cod_err) 
 );
 
+create table year_remaining_days(
+  empl_id number, 
+  remaining_days number, 
+  remaining_year varchar2(10), 
+  constraint uq_row unique (empl_id, remaining_days, remaining_year)
+);

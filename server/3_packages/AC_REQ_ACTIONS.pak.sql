@@ -5,11 +5,11 @@
 create or replace package AC_req_actions as
 
   function is_working_day(pdate date) return boolean;
-  procedure insert_request(p_l_type varchar, p_start_date varchar2, p_end_date varchar2, p_acc_id number, p_dept_id number, p_total_days number, p_id_req out number);
+  procedure insert_request(p_l_type varchar, p_start_date Date, p_end_date Date, pemp_id number, p_dept_id number, p_total_days number, p_is_retroactive varchar2, p_id_req out number);
   function num_days_in_interval(pst_date date, pend_Date date) return number;
-  procedure delete_this_request(pid_req number, pacc_id number);
-  procedure update_this_request(pid_req number, pacc_Id number, p_upd_stmt varchar2);
-  function pending_vacation_req(pacc_Id number, pdept_id number ) return number;
+  procedure delete_this_request(pid_req number, pemp_id number);
+  procedure update_this_request(pid_req number, p_req_type varchar, p_start_date date, p_end_date date, p_total_days number);
+  function pending_vacation_req(pemp_id number, pdept_id number ) return number;
   -- used by web to call before inserting any request we have to validate there is no overlap
   function validate_period(p_st_date date, p_end_date date, pdpt_id number) return varchar2;
   -- Functions that search for overlap with existing resolved requests or newly submitted ones and both
@@ -41,41 +41,50 @@ create or replace package body AC_req_actions as
       end if;
     else
       rez := false;
-    end if;
+    end if; 
     return rez;
   end;
 
-  function num_days_in_interval(pst_date date, pend_Date date) return number as
+  function num_days_in_interval(pst_date date, pend_Date date)
+    return number as
     -- we choose all legal days that are not in a weekend
     cursor c_legal_day is
-      select legal_date from legal_days ld
-        where ld.in_year = to_char(sysdate,'YYYY')
-          and (MOD(TO_CHAR(legal_date, 'J'), 7) + 1 NOT IN (6, 7));
+      select legal_date
+        from legal_days ld
+       where ld.in_year = to_char(sysdate, 'YYYY')
+         and (MOD(TO_CHAR(legal_date, 'J'), 7) + 1 NOT IN (6, 7));
     init_number number;
-    curr_Date date; -- cursor date that we use to go through the interval
-    err_m varchar2(500);
+    curr_Date   date; -- cursor date that we use to go through the interval
+    err_m       varchar2(500);
   begin
-   -- we calculate the default number of days between the interval
-    select (trunc(pend_date + 1) - trunc(pst_date)) into init_number from dual;
-     dbms_output.put_line('starting point ->' || init_number);
-    curr_date := pst_Date;
-    -- we firstly exclude weekend days if there are any
-    loop
-       --dbms_output.put_line('data -> ' || curr_date);
-      if (MOD(TO_CHAR(curr_date, 'J'), 7) + 1 IN (6, 7)) then
-        init_number := init_number -1;
-        /*dbms_output.put_line('este weekend');*/
-      end if;
-      curr_date := curr_date+1;
-      exit when curr_date > pend_date;
-    end loop;
-    -- now we exclude legal days that have already been checked for weekend overlap
-    for x in c_legal_day loop
-      if ((x.legal_date >= pst_date) and (x.legal_date <= pend_date)) then
-        init_number := init_number - 1;
-      end if;
-    end loop;
-
+    if pst_date <= pend_Date then
+      -- we calculate the default number of days between the interval
+      select (trunc(pend_date + 1) - trunc(pst_date))
+        into init_number
+        from dual;
+      dbms_output.put_line('starting point ->' || init_number);
+      curr_date := pst_Date;
+      -- we firstly exclude weekend days if there are any
+      loop
+        --dbms_output.put_line('data -> ' || curr_date);
+        if (MOD(TO_CHAR(curr_date, 'J'), 7) + 1 IN (6, 7)) then
+          init_number := init_number - 1;
+          /*dbms_output.put_line('este weekend');*/
+        end if;
+        curr_date := curr_date + 1;
+        exit when curr_date > pend_date;
+      end loop;
+      -- now we exclude legal days that have already been checked for weekend overlap
+      for x in c_legal_day loop
+        if ((x.legal_date >= pst_date) and (x.legal_date <= pend_date)) then
+          init_number := init_number - 1;
+        end if;
+      end loop;
+    else 
+      select (trunc(pend_date) - trunc(pst_date))
+        into init_number
+        from dual;
+    end if;
     return init_number;
   exception
     when others then
@@ -83,9 +92,9 @@ create or replace package body AC_req_actions as
       raise_application_error(-20150, err_m);
   end num_days_in_interval;
 
-  --#### This function will be called from backing bean once remaining days and taken days are calculated
+  --#### function no longer used. Less restrictive process of adding requests.!
   function validate_period(p_st_date date, p_end_date date, pdpt_id number) return varchar2 as
-      -- we search for how many days of the interval are already covered
+    -- we search for how many days of the interval are already covered
     rez varchar2(60);
     existing_req_per_int number;
     accepted_final_no number;
@@ -125,7 +134,7 @@ create or replace package body AC_req_actions as
         raise_application_error(-20155, exm);
   end validate_period;
 
-  procedure insert_request(p_l_type varchar, p_start_date varchar2, p_end_date varchar2, p_acc_id number, p_dept_id number, p_total_days number, p_id_req out number) as
+  procedure insert_request(p_l_type varchar, p_start_date Date, p_end_date Date, pemp_id number, p_dept_id number, p_total_days number,p_is_retroactive varchar2, p_id_req out number) as
     p_out_msg varchar2(255);
   begin
     if p_l_type = 'VACATION_LEAVE'  then
@@ -134,7 +143,7 @@ create or replace package body AC_req_actions as
                type_of_req,
                status,
                submition_date,
-               acc_id,
+               emp_id,
                dept_id,
                start_date,
                end_date,
@@ -150,7 +159,7 @@ create or replace package body AC_req_actions as
                 p_l_type,
                 'SUBMITTED',
                 trunc(sysdate),
-                p_acc_id,
+                pemp_id,
                 p_dept_id,
                 p_start_date,
                 p_end_date,
@@ -167,7 +176,7 @@ create or replace package body AC_req_actions as
                type_of_req,
                status,
                submition_date,
-               acc_id,
+               emp_id,
                dept_id,
                start_date,
                end_date,
@@ -176,6 +185,7 @@ create or replace package body AC_req_actions as
                res_user,
                rejected,
                rejected_user,
+               is_retroactive,
                under_review
                )
             values
@@ -183,7 +193,7 @@ create or replace package body AC_req_actions as
                 p_l_type,
                 'SUBMITTED',
                 trunc(sysdate),
-                p_acc_id,
+                pemp_id,
                 p_dept_id,
                 p_start_date,
                 p_end_date,
@@ -192,6 +202,7 @@ create or replace package body AC_req_actions as
                 null,
                 'N',
                 null,
+                p_is_retroactive,
                 'N');
       p_id_req := req_id_seq.currval;
     end if;
@@ -202,13 +213,13 @@ create or replace package body AC_req_actions as
       raise_application_error(-20155, p_out_msg);
   end insert_request;
 
-  procedure delete_this_request(pid_req number, pacc_id number) is
+  procedure delete_this_request(pid_req number, pemp_id number) is
     --  no need for additional checks here as we will have a procedure that calculates all of the possible actions on a request
     errm varchar2(500);
     PARAMTERII_NULI exception;
   begin
-    if (pid_req is not null and pacc_id is not null)then
-      delete requests rq where rq.id = pid_req and rq.acc_id = pacc_id;
+    if (pid_req is not null and pemp_id is not null)then
+      delete requests rq where rq.id = pid_req and rq.emp_id = pemp_id;
     else
       raise PARAMTERII_NULI;
     end if;
@@ -219,18 +230,32 @@ create or replace package body AC_req_actions as
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20154, 'Error deleting request: ' || errm);
   end;
-  procedure update_this_request(pid_req number, pacc_Id number, p_upd_stmt varchar2) is
-    --  no need for additional checks here as we will have a procedure that calculates all of the possible actions on a request
+  
+  procedure update_this_request(pid_req number, p_req_type varchar, p_start_date date, p_end_date date, p_total_days number) is   
+    -- all other checks before updating are done in the trigger 
+    reqFound number;
     errm varchar2(500);
   begin
-      EXECUTE IMMEDIATE p_upd_stmt;
+    select count(*) into reqFound from requests rq where rq.id = pid_req;
+    if(reqFound = 1) then 
+      update requests rq
+         set rq.type_of_req      = p_req_type,
+             rq.start_date       = p_start_date,
+             rq.end_date         = p_end_date,
+             rq.total_no_of_days = p_total_days
+       where rq.id = pid_req;
+       commit;
+    else
+      raise_application_error(-20157, 'Request to update NOT Found! ');
+    end if;
   exception
     when others then
+      rollback;
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20157, 'Error in updating request: ' || errm);
   end;
 
-  function pending_vacation_req(pacc_Id number, pdept_id number) return number as
+  function pending_vacation_req(pemp_id number, pdept_id number) return number as
 
     /*Returns an info message saying there are other pending requests as well*/
     -- we search for all unprocessed requests 
@@ -240,7 +265,7 @@ create or replace package body AC_req_actions as
        where exists (select 1 from status_types st where st.stat_code = rq.status and st.final = 'N')
          and rq.resolved = 'N'
          and rq.rejected = 'N'
-         and rq.acc_id = pacc_Id
+         and rq.emp_id = pemp_id
          and rq.dept_id = pdept_id
          and rq.type_of_req <> 'MEDICAL_LEAVE';
     rez number;
@@ -415,6 +440,7 @@ create or replace package body AC_req_actions as
           exit when currDate > x.end_date;
             if (is_working_day(currDate)) then
               if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
+                
                 D := to_number(extract(DAY from currDate));
                 Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
                 

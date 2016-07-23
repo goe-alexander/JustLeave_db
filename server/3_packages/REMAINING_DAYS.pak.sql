@@ -1,9 +1,12 @@
-
 create or replace package REMAINING_DAYS as
   -- admin procedure for registering new accounts.
-  procedure get_vacation_ballance(pacc_id number, pdept_id number, pnow_interval number, rem_days out number, days_taken out number);
-  procedure get_default_vacation_ballance(pacc_id number, pdept_id number, rem_days out number, days_taken out number);
+  procedure get_vacation_ballance(pemp_id number, pdept_id number, pnow_interval number,rem_days out number, days_taken out number);
+  procedure get_restant_ballance(pemp_id number, pdept_id number, pnow_interval number, rem_days out number, days_taken out number);
+  
+  procedure get_default_vacation_ballance(pemp_id  number, pdept_id number, rem_days out number, days_taken out number);
+  procedure get_default_restant_vb(pemp_id  number, pdept_id number, rem_days out number, days_taken out number);
 end REMAINING_DAYS;
+
 
 create or replace package body REMAINING_DAYS as
 
@@ -13,25 +16,23 @@ create or replace package body REMAINING_DAYS as
   pp_hired_this_year boolean := false;
   pp_total_leave_days days_per_year.max_no_days%type;
   pp_dept_code varchar2(60);
-  pp_days_per_month number;         
-  procedure init_pp(pacc_id number, pdept_id number) is
+  pp_days_per_month number;
+  
+  procedure init_pp(pemp_id number, pdept_id number) is
     cursor c_get_emp is
-      select ap.emp_id
-        from app_users ap
-       where ap.id = pacc_id;
+      select 1 from employees emp where emp.emp_id = pemp_id;
     cge c_get_emp%rowtype;
     init_err varchar2(500);
   begin
     open c_get_emp;
     fetch c_get_emp into cge;
     if c_get_emp%found then
-      pp_emp_id := cge.emp_id;
       begin
         select dp.max_no_days into pp_total_leave_days from days_per_year dp where dp.req_code = 'VACATION_LEAVE';
         select dpm.no_of_days into pp_days_per_month from days_per_month dpm where dpm.req_code = 'VACATION_LEAVE';
-        select emp.trial_period into  pp_trial_period  from employees emp where emp.emp_id = (select ap.emp_id from app_users ap where ap.id = pacc_id);
+        select emp.trial_period into  pp_trial_period  from employees emp where emp.emp_id = pemp_id;
         select dt.code into pp_dept_code from departments dt where dt.dep_id = pdept_id;
-        for x in (select 1 from employees emp where emp.emp_id = pp_emp_id and extract(YEAR from emp.hire_date) = extract(year from sysdate) and rownum = 1) loop
+        for x in (select 1 from employees emp where emp.emp_id = pemp_id and extract(YEAR from emp.hire_date) = extract(year from sysdate) and rownum = 1) loop
           pp_hired_this_year := true;
         end loop;
       exception
@@ -41,7 +42,6 @@ create or replace package body REMAINING_DAYS as
       end;
     else
       -- the employee was not found
-      pp_emp_id := null;
       raise_application_error(-20155, 'Unable to determine employee id');
     end if;
     close c_get_emp;
@@ -51,6 +51,7 @@ create or replace package body REMAINING_DAYS as
       raise_application_error(-20156, init_err);
   end;
 
+  -- calculates dates for employees that are in trial period and are hired recently based on what he has left to the end of the year
   function days_for_emp_hired_recently(pemp_id number) return number as
     mb number;
     errm varchar2(500);
@@ -77,29 +78,30 @@ create or replace package body REMAINING_DAYS as
       raise_application_error( -20100, errm);
   end;
 
-  
 
-  procedure get_vacation_ballance(pacc_id number, pdept_id number, pnow_interval number, rem_days out number, days_taken out number) as
+  --Calculates the total number of days 
+  procedure get_vacation_ballance(pemp_id number, pdept_id number, pnow_interval number, rem_days out number, days_taken out number) as
     cursor c_get_taken_days is
     select rq.total_no_of_days
         from requests rq
-       where acc_id = pacc_id 
+       where rq.emp_id = pemp_id
          and rq.dept_id = pdept_id
          and rq.status <> 'REJECTED'
          and extract(YEAR FROM rq.start_date) = extract(YEAR from sysdate)
          and rq.rejected = 'N'
-         and rq.rejected_user is null  
-         and rq.type_of_req ='VACATION_LEAVE';
+         and rq.rejected_user is null
+         and rq.type_of_req = 'VACATION_LEAVE';
     total_days_taken number := 0;
     remaining_result number;
     errm varchar2(580);
   begin
   -- we initialize the package variables
-    init_pp(pacc_id, pdept_id );
+    init_pp(pemp_id, pdept_id );
   -- we get what was already taken
-    for x  in c_get_taken_days  loop
+    for x in c_get_taken_days  loop
       total_days_taken := total_days_taken + x.total_no_of_days;
     end loop;
+  
     if (pp_trial_period = 'N' and  pp_hired_this_year = false) then
        -- standard number of days apply
        remaining_result :=  pp_total_leave_days - (total_days_taken + pnow_interval);
@@ -112,7 +114,7 @@ create or replace package body REMAINING_DAYS as
       remaining_result := (3 * pp_days_per_month) - (total_days_taken + pnow_interval);
     end if;
     rem_days := remaining_result;
-    days_taken := total_days_taken + pnow_interval; 
+    days_taken := total_days_taken + pnow_interval;
   exception
     when others then
       errm := substr(sqlerrm,1,500);
@@ -122,21 +124,21 @@ create or replace package body REMAINING_DAYS as
       raise_application_error(-20150, errm);
   end;
 
-  procedure get_default_vacation_ballance(pacc_id number, pdept_id number, rem_days out number, days_taken out number) as
+  procedure get_default_vacation_ballance(pemp_id number, pdept_id number, rem_days out number, days_taken out number) as
     cursor c_get_taken_days is
      select rq.total_no_of_days
         from requests rq
-       where acc_id = pacc_id 
+       where rq.emp_id = pemp_id
          and rq.dept_id = pdept_id
          and rq.status <> 'REJECTED'
          and extract(YEAR FROM rq.start_date) = extract(YEAR from sysdate)
          and rq.rejected = 'N'
-         and rq.rejected_user is null  
+         and rq.rejected_user is null
          and rq.type_of_req ='VACATION_LEAVE';
     def_rem_days number;
     total_days_taken number;
   begin
-    init_pp(pacc_id, pdept_id );
+    init_pp(pemp_id, pdept_id );
     def_rem_days := 0;
     total_days_taken := 0;
     for x in c_get_taken_days loop
@@ -157,7 +159,7 @@ create or replace package body REMAINING_DAYS as
           -- assuming standard contract is 3 months then we have
           def_rem_days := (3 * pp_days_per_month) - total_days_taken;
         end if;
-    else 
+    else
         if (pp_trial_period = 'N' and  pp_hired_this_year = false) then
            -- standard number of days apply
            def_rem_days :=  pp_total_leave_days;
@@ -167,9 +169,9 @@ create or replace package body REMAINING_DAYS as
         elsif (pp_trial_period = 'D') then
           -- assuming standard contract is 3 months then we have
           def_rem_days := (3 * pp_days_per_month);
-        end if;        
-    end if; 
-    rem_days := def_rem_days; 
+        end if;
+    end if;
+    rem_days := def_rem_days;
     days_taken := total_days_taken;
   exception
     when others then
@@ -177,6 +179,91 @@ create or replace package body REMAINING_DAYS as
       days_taken := -1;
       raise_application_error(-20150, 'Issue getting taken_days');
   end;
+  
+  --Gets remaining Days from Last Year
+  procedure get_default_restant_vb(pemp_id  number, pdept_id number, rem_days out number, days_taken out number) as
+    -- If request is not rejected then it is taken into consideration in VacationBallance
+    cursor c_get_taken_days is
+     select rq.total_no_of_days
+        from requests rq
+       where rq.emp_id = pemp_id
+         and rq.dept_id = pdept_id
+         and rq.status <> 'REJECTED'
+         and extract(YEAR FROM rq.start_date) = extract(YEAR from sysdate)
+         and rq.rejected = 'N'
+         and rq.rejected_user is null
+         and rq.type_of_req ='RESTANT_LEAVE';  
+
+    total_days_taken number;  
+    total_rem_last_year number;    
+    cnt number;
+    to_many_rows_in_year EXCEPTION; 
+  BEGIN 
+    total_days_taken := 0;
+    for x in c_get_taken_days loop
+      total_days_taken := total_days_taken  + x.total_no_of_days;
+    end loop;
+    
+    cnt := 0;
+    -- we go and check how many requests for remaining_leave days have been made
+    for x in (select * from restant_days yrd where yrd.empl_id = pemp_id and yrd.remaining_year = extract(YEAR from sysdate) - 1) loop
+      cnt := cnt + 1;
+      if cnt > 1 then 
+        raise to_many_rows_in_year;
+      end if;
+      total_rem_last_year := x.remaining_days;  
+    end loop;
+     
+    rem_days := total_rem_last_year - total_days_taken;
+    days_taken := total_days_taken;
+  EXCEPTION
+    when to_many_rows_in_year then 
+      raise_application_error(-20150, 'To Many Values for remaining Days in last Year');
+  END;
+  
+  procedure get_restant_ballance(pemp_id number, pdept_id number, pnow_interval number, rem_days out number, days_taken out number) as 
+    cursor c_get_taken_days is
+     select rq.total_no_of_days
+        from requests rq
+       where rq.emp_id = pemp_id
+         and rq.dept_id = pdept_id
+         and rq.status <> 'REJECTED'
+         and extract(YEAR FROM rq.start_date) = extract(YEAR from sysdate)
+         and rq.rejected = 'N'
+         and rq.rejected_user is null
+         and rq.type_of_req ='RESTANT_LEAVE';
+    total_days_taken number;   
+    total_rem_last_year number;    
+    errm varchar2(255);      
+    
+    cnt number;
+    to_many_rows_in_year EXCEPTION;    
+  BEGIN 
+    total_days_taken := 0;
+    for x in c_get_taken_days loop
+      total_days_taken := total_days_taken  + x.total_no_of_days;
+    end loop;    
+    
+    for x in (select * from restant_days yrd where yrd.empl_id = pemp_id and yrd.remaining_year = extract(YEAR from sysdate) - 1) loop
+      cnt := cnt + 1;
+      if cnt > 1 then 
+        raise to_many_rows_in_year;
+      end if;
+      total_rem_last_year := x.remaining_days;  
+    end loop;   
+    
+    rem_days := total_rem_last_year - pnow_interval;
+    days_taken := pnow_interval;
+  EXCEPTION
+    when to_many_rows_in_year then 
+      raise_application_error(-20150, 'To Many Values for remaining Days in last Year'); 
+    when others then 
+      errm := substr(sqlerrm,1,500);
+      --in case there's an exception we set the values to -1 and display the error message incalculating the data objects
+      rem_days := -1;
+      days_taken := -1;
+      raise_application_error(-20150, errm);          
+  END;  
 
   function get_max_sick_days_year return number as
 

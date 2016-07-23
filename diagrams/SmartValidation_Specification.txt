@@ -1,0 +1,40 @@
+Smart Validation 
+
+Potential Input Parameters
+  - Overlap
+  - stDate ; endDate [interval in question:] ! This will always need to be specified to know exactly what requests to address. So only requests in that interval will be taken into acoount !! 
+  - First  
+  - Wait_for_turn
+
+
+If none of above then 
+  - sysrefcursor with all requests at the moment of submittion and approve them all   
+
+No overlap period 
+	- get all requests that have been submitted but are not under review and not of type medical 
+	
+	  maximum overlap needs to be calculated so procedure will take a parameter number of how many can be on leave at any given time 
+	  
+	For each request encountered we   
+	
+		we have to check if first come first served apply or wait for your turn 
+			If fcfs 
+				we order the requests by date descending and validate them as they come, then we make sure to check the maximum overlapped request by searching for any requests already approved that are in that 
+				department. Once accepted overlap number has been exceeded we need to check another parameter ;
+			If wait for your turn then we need to have another marker of what the minimum accepted difference is
+				then we build a virtual table with all days taken and arrange then in ascending order and approve them as they come with respect to the number of requests allowed in the overlap
+				
+				
+				
+Breaking them down to Methods:
+	Private Methods:
+	-----------------------
+	function can_approve_request(phow_many number, pstart_date date, pend_date date, preq_id number ) returns boolean;		[checks how many requests have been approved that are in the given interval and return a boolean]
+	validate_request() [already implemented]
+	function get_taken_days(pempl_id number) returns ref_cursor;
+	
+	Exposed_Methods:
+	-----------------------
+	procedure Smart_Validation(pstart_date date, pend_date date, prule number, pmng_id number) [ prule is either 1 or 2; later on we can modify to include them in a table if we have multiple validation rules]
+	procedure Bulk_Validation(pall_these varray) []	
+	

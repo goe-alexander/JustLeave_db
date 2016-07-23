@@ -7,3 +7,4 @@ create index idx_req_total_days on requests(total_no_of_days);
 create index on activities(act_code);
 create index idx_days_req_code on days_per_year(req_code);
 create index idx_req_type_code on request_types(req_code);                                                                                                            
+create index empl_id_idx on year_remaining_days(empl_id);	

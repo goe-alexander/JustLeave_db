@@ -41,7 +41,7 @@ create or replace package body ADMIN_UTILS as
       raise;
   end;
 
-  procedure delete_empl(pid_empl varchar2) as
+  procedure delete_empl(pid_empl number) as
     errMsg varchar2(255);
     -- cursor that checks if there is an application user to delete it also
     cursor c_check_user is
@@ -103,7 +103,7 @@ create or replace package body ADMIN_UTILS as
       empId := emp_id_seq.currval;  
     exception
       when others then 
-        errMsg := substr(sqlerrm, 1, 500); 
+        errMsg := substr(sqlerrm, 1, 255); 
         raise_application_error(-20157, errMsg);
     end; 
     dbms_output.put_line('Null checks');
@@ -115,6 +115,7 @@ create or replace package body ADMIN_UTILS as
     end if;
   exception 
     when others then 
+       errMsg := substr(sqlerrm, 1, 255);
        raise_application_error(-20157, errMsg);
   end;
   
@@ -207,5 +208,10 @@ create or replace package body ADMIN_UTILS as
       errM := substr(sqlerrm, 1, 500);
       raise_application_error(-20155, errM);
   END;
+  
+   procedure get_emp_appuser(pid_empl number) as
+   BEGIN
+    null;
+   END;
   
 end;
