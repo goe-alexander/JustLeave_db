@@ -1,11 +1,14 @@
 /* Package that contains all available actions on a request as well as 
   procedures to determine which actions are available on which request 
-  based on user role and start date of each vaction leave
+  according to role and start date of each vaction leave
 */
 create or replace package AC_req_actions as
 
   function is_working_day(pdate date) return boolean;
   procedure insert_request(p_l_type varchar, p_start_date Date, p_end_date Date, pemp_id number, p_dept_id number, p_total_days number, p_is_retroactive varchar2, p_id_req out number);
+  -- used for inserting from db, calculates the number of days between the dates 
+  procedure insert_rq_from_db(p_l_type varchar, p_start_date Date, p_end_date Date, pemp_id number, p_dept_id number, p_is_retroactive varchar2, p_id_req out number);
+  
   function num_days_in_interval(pst_date date, pend_Date date) return number;
   procedure delete_this_request(pid_req number, pemp_id number);
   procedure update_this_request(pid_req number, p_req_type varchar, p_start_date date, p_end_date date, p_total_days number);
@@ -41,7 +44,7 @@ create or replace package body AC_req_actions as
       end if;
     else
       rez := false;
-    end if; 
+    end if;
     return rez;
   end;
 
@@ -80,7 +83,7 @@ create or replace package body AC_req_actions as
           init_number := init_number - 1;
         end if;
       end loop;
-    else 
+    else
       select (trunc(pend_date) - trunc(pst_date))
         into init_number
         from dual;
@@ -152,6 +155,7 @@ create or replace package body AC_req_actions as
                res_user,
                rejected,
                rejected_user,
+               is_retroactive,
                under_review
                )
             values
@@ -168,8 +172,9 @@ create or replace package body AC_req_actions as
                 null,
                 'N',
                 null,
+                p_is_retroactive,
                 'N');
-        p_id_req := req_id_seq.currval;       
+        p_id_req := req_id_seq.currval;
     else
           insert into requests
               (id,
@@ -213,6 +218,92 @@ create or replace package body AC_req_actions as
       raise_application_error(-20155, p_out_msg);
   end insert_request;
 
+
+  procedure insert_rq_from_db(p_l_type varchar, p_start_date Date, p_end_date Date, pemp_id number, p_dept_id number, p_is_retroactive varchar2, p_id_req out number) is
+      p_out_msg varchar2(255);
+      number_of_days number;
+  begin
+    number_of_days := num_days_in_interval(pst_date => p_start_date, pend_Date => p_end_date);
+
+    if p_l_type = 'VACATION_LEAVE'  then
+        insert into requests
+              (id,
+               type_of_req,
+               status,
+               submition_date,
+               emp_id,
+               dept_id,
+               start_date,
+               end_date,
+               total_no_of_days,
+               resolved,
+               res_user,
+               rejected,
+               rejected_user,
+               is_retroactive,
+               under_review
+               )
+            values
+              ( REQ_ID_SEQ.NEXTVAL,
+                p_l_type,
+                'SUBMITTED',
+                trunc(sysdate),
+                pemp_id,
+                p_dept_id,
+                p_start_date,
+                p_end_date,
+                number_of_days,
+                'N',
+                null,
+                'N',
+                null,
+                p_is_retroactive,
+                'N');
+        p_id_req := req_id_seq.currval;
+    else
+          insert into requests
+              (id,
+               type_of_req,
+               status,
+               submition_date,
+               emp_id,
+               dept_id,
+               start_date,
+               end_date,
+               total_no_of_days,
+               resolved,
+               res_user,
+               rejected,
+               rejected_user,
+               is_retroactive,
+               under_review
+               )
+            values
+              ( REQ_ID_SEQ.NEXTVAL,
+                p_l_type,
+                'SUBMITTED',
+                trunc(sysdate),
+                pemp_id,
+                p_dept_id,
+                p_start_date,
+                p_end_date,
+                number_of_days,
+                'N',
+                null,
+                'N',
+                null,
+                p_is_retroactive,
+                'N');
+      p_id_req := req_id_seq.currval;
+    end if;
+  exception
+    when others then
+      rollback;
+      p_out_msg := substr(sqlerrm, 1, 500);
+      raise_application_error(-20155, p_out_msg);
+  end insert_rq_from_db;
+
+
   procedure delete_this_request(pid_req number, pemp_id number) is
     --  no need for additional checks here as we will have a procedure that calculates all of the possible actions on a request
     errm varchar2(500);
@@ -230,14 +321,14 @@ create or replace package body AC_req_actions as
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20154, 'Error deleting request: ' || errm);
   end;
-  
-  procedure update_this_request(pid_req number, p_req_type varchar, p_start_date date, p_end_date date, p_total_days number) is   
-    -- all other checks before updating are done in the trigger 
+
+  procedure update_this_request(pid_req number, p_req_type varchar, p_start_date date, p_end_date date, p_total_days number) is
+    -- all other checks before updating are done in the trigger
     reqFound number;
     errm varchar2(500);
   begin
     select count(*) into reqFound from requests rq where rq.id = pid_req;
-    if(reqFound = 1) then 
+    if(reqFound = 1) then
       update requests rq
          set rq.type_of_req      = p_req_type,
              rq.start_date       = p_start_date,
@@ -258,7 +349,7 @@ create or replace package body AC_req_actions as
   function pending_vacation_req(pemp_id number, pdept_id number) return number as
 
     /*Returns an info message saying there are other pending requests as well*/
-    -- we search for all unprocessed requests 
+    -- we search for all unprocessed requests
     cursor c_get_pend_vac_leave is
       select count(*) "TOATE"
         from requests rq
@@ -275,11 +366,11 @@ create or replace package body AC_req_actions as
     end loop;
     return rez;
   end;
-  
+
   function get_submitted_overlapped_days(preq_id number) return col_overlapped_days as
     od col_overlapped_days := col_overlapped_days();
     od_distinct col_overlapped_days := col_overlapped_days();
-    
+
     currDate date;
     D number;
     Mnth varchar2(30);
@@ -287,12 +378,12 @@ create or replace package body AC_req_actions as
     errm varchar2(255);
     cursor getRequest is
       select * from requests rq where rq.id = preq_id;
-    gr getRequest%rowtype;  
+    gr getRequest%rowtype;
   begin
     Mnth := '';
     open getRequest;
     fetch getRequest into gr;
-    
+
     if getRequest%found then
       -- we go through all submitted requests(except the one in question) to see if it may overlap
       for x in(select * from requests rq where rq.status = 'SUBMITTED' and rq.resolved != 'D' and rq.type_of_req != 'MEDICAL_LEAVE' and rq.id != preq_id  and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
@@ -304,7 +395,7 @@ create or replace package body AC_req_actions as
               if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
                 D := to_number(extract(DAY from currDate));
                 Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
-                
+
                 od.extend;
                 od(od.last) := (overlap_day(D, Mnth));
               end if;
@@ -313,10 +404,10 @@ create or replace package body AC_req_actions as
               continue;
             end if;
           currDate := currDate + 1;
-        end loop;            
+        end loop;
       end loop;
-    else 
-      raise REQ_NOT_FOUND;  
+    else
+      raise REQ_NOT_FOUND;
     end if;
     close getRequest;
    --we go through the collection and get all distinct values so we don't repeat an overlapped day
@@ -325,20 +416,20 @@ create or replace package body AC_req_actions as
       od_distinct.extend;
       od_distinct(od_distinct.last) := (overlap_day(x.DAY_OVERLAPPED, x.MONTH_OF_DAY));
     end loop;
-        
+
     return od_distinct;
-  exception  
+  exception
     when REQ_NOT_FOUND then
       raise_application_error(-20150, 'No such req found when checking for overlapps');
-    when others then   
+    when others then
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20150, errm);
-  end;  
-  
+  end;
+
   function get_resolved_overlapped_days(preq_id number) return col_overlapped_days as
     od col_overlapped_days := col_overlapped_days();
     od_distinct col_overlapped_days := col_overlapped_days();
-    
+
     currDate date;
     D number;
     Mnth varchar2(30);
@@ -346,12 +437,12 @@ create or replace package body AC_req_actions as
     errm varchar2(255);
     cursor getRequest is
       select * from requests rq where rq.id = preq_id;
-    gr getRequest%rowtype;  
+    gr getRequest%rowtype;
   begin
     Mnth := '';
     open getRequest;
     fetch getRequest into gr;
-    
+
     if getRequest%found then
       -- we go through all resolved requests to see if it may overlap
       for x in (select * from requests rq where rq.resolved = 'D' and rq.status = 'RESOLVED' and rq.type_of_req != 'MEDICAL_LEAVE' and rq.dept_id  = gr.dept_id and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
@@ -373,8 +464,8 @@ create or replace package body AC_req_actions as
           currDate := currDate + 1;
         end loop;
       end loop;
-    else 
-      raise REQ_NOT_FOUND;  
+    else
+      raise REQ_NOT_FOUND;
     end if;
     close getRequest;
     --we go through the collection and get all distinct values so we don't repeat an overlapped day
@@ -383,21 +474,21 @@ create or replace package body AC_req_actions as
       od_distinct.extend;
       od_distinct(od_distinct.last) := (overlap_day(x.DAY_OVERLAPPED, x.MONTH_OF_DAY));
     end loop;
-    
+
     return od_distinct;
-  exception  
+  exception
     when REQ_NOT_FOUND then
       raise_application_error(-20150, 'No such req found when checking for overlapps');
-    when others then   
+    when others then
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20150, errm);
-  end;  
-  
-  -- Function that checks all resolved and submitted requests for overlapped days. This will be called when manually resolving 
+  end;
+
+  -- Function that checks all resolved and submitted requests for overlapped days. This will be called when manually resolving
   function get_all_overlapped_days(preq_id number) return col_overlapped_days as
     od col_overlapped_days := col_overlapped_days();
     od_distinct col_overlapped_days := col_overlapped_days();
-    
+
     currDate date;
     D number;
     Mnth varchar2(30);
@@ -405,12 +496,12 @@ create or replace package body AC_req_actions as
     errm varchar2(255);
     cursor getRequest is
       select * from requests rq where rq.id = preq_id;
-    gr getRequest%rowtype;  
+    gr getRequest%rowtype;
   begin
     Mnth := '';
     open getRequest;
     fetch getRequest into gr;
-    
+
     if getRequest%found then
       -- we go through all resolved requests to see if it may overlap
       for x in (select * from requests rq where rq.resolved = 'D' and rq.status = 'RESOLVED' and rq.type_of_req != 'MEDICAL_LEAVE'  and rq.dept_id  = gr.dept_id and (trunc(rq.start_date) <= trunc(gr.end_date) and trunc(rq.end_date) >= trunc(gr.start_date))) loop
@@ -440,10 +531,9 @@ create or replace package body AC_req_actions as
           exit when currDate > x.end_date;
             if (is_working_day(currDate)) then
               if(trunc(currDate) >= gr.start_date and trunc(currDate) <= gr.end_date) then
-                
                 D := to_number(extract(DAY from currDate));
                 Mnth := trim(to_char(to_date(to_number(extract(month from currDate)), 'MM'), 'MONTH'));
-                
+
                 od.extend;
                 od(od.last) := (overlap_day(D, Mnth));
               end if;
@@ -452,10 +542,10 @@ create or replace package body AC_req_actions as
               continue;
             end if;
           currDate := currDate + 1;
-        end loop;            
+        end loop;
       end loop;
-    else 
-      raise REQ_NOT_FOUND;  
+    else
+      raise REQ_NOT_FOUND;
     end if;
     close getRequest;
     --we go through the collection and get all distinct values so we don't repeat an overlapped day
@@ -464,12 +554,12 @@ create or replace package body AC_req_actions as
       od_distinct.extend;
       od_distinct(od_distinct.last) := (overlap_day(x.DAY_OVERLAPPED, x.MONTH_OF_DAY));
     end loop;
-    
+
     return od_distinct;
-  exception  
+  exception
     when REQ_NOT_FOUND then
       raise_application_error(-20150, 'No such req found when checking for overlapps');
-    when others then   
+    when others then
       errm := substr(sqlerrm, 1, 500);
       raise_application_error(-20150, errm);
   end;

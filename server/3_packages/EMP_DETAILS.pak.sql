@@ -1,8 +1,9 @@
-create or replace package EMP_details as 
+create or replace package EMP_details as
   procedure get_emp_details(p_acc_name in varchar2, p_emp_out out emp_details_type);
-  -- we create another procedure to check the users role 
+  -- we create another procedure to check the users role
   procedure get_users_role(papp_user_code varchar2, out_usr_role out varchar2);
 end EMP_details;
+
 create or replace package body EMP_details as
   procedure get_emp_details(p_acc_name in varchar2, p_emp_out out emp_details_type) as
     cursor cget_emp_det is
@@ -37,19 +38,23 @@ create or replace package body EMP_details as
     cursor c_get_usr_role is
       select rt.role_code from user_atributions ua
                       join role_types rt on ua.role_id = rt.role_id
-                        where ua.emp_id = (select au.emp_id from app_users au where au.code = upper(papp_user_code));
+                        where ua.acc_id = (select au.id from app_users au where au.code = upper(papp_user_code));
 
-    cg_ur c_get_usr_role%rowtype;
     errm varchar2(250);
+    
+    no_role_found exception;
   begin
-    open c_get_usr_role;
-    fetch c_get_usr_role into cg_ur;
-    if c_get_usr_role%found then
-      out_usr_role :=  cg_ur.role_code;
-    else
-      out_usr_role := 'No role found for user';
+    out_usr_role := '';
+    for x in c_get_usr_role loop
+      out_usr_role := out_usr_role ||  x.role_code;     end loop;
+  
+    if out_usr_role is null then 
+      raise no_role_found;
     end if;
   exception
+    when no_role_found then 
+      raise_application_error(-20155, 'No role found for specified userName'); 
+  
     when others then
       errm := substr(sqlerrm, 1, 250);
       out_usr_role := 'Issue in determining role: ' || errm;

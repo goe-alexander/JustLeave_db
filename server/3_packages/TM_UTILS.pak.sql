@@ -11,11 +11,9 @@ create or replace package TM_UTILS as
   -- passing attributions to another TM
   procedure Pass_Attributions(pempl_id number, ptm_target varchar2);
 end TM_UTILS;
-
 create or replace package body TM_UTILS as
   
   procedure mark_for_review(preq_id number, pemp_id number, pmng_id number) as 
-
     c_mng number;
     MNG_ISSUE EXCEPTION; 
     errM varchar2(255);     
@@ -25,13 +23,12 @@ create or replace package body TM_UTILS as
         and emp.tm_id = pmng_id; 
     if (c_mng = 1 ) then
       update requests rq 
-        set rq.under_review = 'D';
-
+        set rq.under_review = 'D',
+            rq.status = 'UNDER_REVIEW'
+          where rq.id = preq_id;
     else
       raise MNG_ISSUE;
-
     end if;
-
     select f_name || ' ' || l_name into empl_name from employees emp where emp.emp_id = pemp_id;     
   exception  
     when MNG_ISSUE then 
@@ -41,33 +38,29 @@ create or replace package body TM_UTILS as
       errM := substr(sqlerrm, 1, 500);  
       raise_application_error(-20155, errM);            
   END;
-
   
     
-  procedure direct_rejection(preq_id number, pemp_id number, pmng_id number) as
-    cursor c_check_empl is 
+  procedure direct_rejection(preq_id number, pmng_id number) as
+    
+    -- all these checks should be done once in the trigger
+    
+    
+/*    cursor c_check_empl is 
       select 1 from requests rq 
-        join employees emp on emp.emp_id = rq.emp_id;
-
+        join employees emp on emp.emp_id = rq.emp_id
+        where emp.emp_id = pemp_id
+          and emp.tm_id = pmng_id
+          and rq.id = preq_id;
     cce c_check_empl%rowtype;
         
     cursor c_check_mng is
       select 1 from employees emp where emp.emp_id = pemp_id 
         and emp.tm_id = pmng_id;
-
-    ccm c_check_mng%rowtype;  
+    ccm c_check_mng%rowtype;  */
     empl_name varchar2(40);
     errm varchar2(255);     
-    EMPL_ISSUE EXCEPTION;
-    MNG_ISSUE EXCEPTION;
 
   BEGIN 
-    open c_check_empl;
-    fetch c_check_empl into cce;
-    if  c_check_empl%found then 
-      open c_check_mng;
-      fetch c_check_mng into ccm;
-      if c_check_mng%found then 
         update requests rq
            set rq.rejected_user  = pmng_id,
                rq.rejected   = 'D',
@@ -75,30 +68,17 @@ create or replace package body TM_UTILS as
                rq.res_user = null,
                rq.status = 'REJECTED'
          where rq.id = preq_id;        
-      else 
-        raise MNG_ISSUE;
-
-      end if;
-
-      close c_check_mng;
-    else 
-      raise EMPL_ISSUE;
-
-    end if;
-
-    close c_check_empl;
-    select f_name || ' ' || l_name into empl_name from employees emp where emp.emp_id = pemp_id; 
+    select f_name || ' ' || l_name into empl_name from employees emp where emp.emp_id = (select rq.emp_id from requests rq where rq.id = preq_id); 
   EXCEPTION 
-    when MNG_ISSUE then 
+/*    when MNG_ISSUE then 
       raise_application_error(-20155, 'You are not the manager of this employee: ' || empl_name);
     when EMPL_ISSUE then
-      raise_application_error(-20155, 'Request not associated with this: ' || empl_name);  
+      raise_application_error(-20155, 'Request not associated with this: ' || empl_name);  */
     when others then 
       rollback;
       errM := substr(sqlerrm, 1, 500);  
       raise_application_error(-20155, errM);        
   END;
-
 
  
   procedure check_validate_request(pid_req number, pmng_id number) as
@@ -109,13 +89,10 @@ create or replace package body TM_UTILS as
     
     errM varchar2(255);
     cnt number;
-
   begin
     select count(*) into cnt from requests rq where rq.id = pid_req;
-
     if(cnt  > 0 ) then
       select count(*) into cnt from app_users a where a.emp_id = pmng_id;
-
       if(cnt = 1) then
         -- we check one last time to see if there are overlaps when resolving the request(the case of another req being submitted right before this is attempted)
         checkOverlap := AC_REQ_ACTIONS.get_all_overlapped_days(pid_req);
@@ -127,21 +104,16 @@ create or replace package body TM_UTILS as
                  rq.rejected   = 'N',
                  rq.status = 'RESOLVED'
            where rq.id = pid_req;
-
            commit;
         else 
           raise overlapExcep;
-
         end if;     
       else
         raise validationUser;
-
       end if;        
     else
       raise noSuchRequest;
-
     end if;
-
     
   exception
     when noSuchRequest then 
@@ -155,7 +127,6 @@ create or replace package body TM_UTILS as
       errM := substr(sqlerrm, 1, 500);  
       raise_application_error(-20155, errM);  
   end;
-
   
   
   
@@ -164,10 +135,8 @@ create or replace package body TM_UTILS as
     userValidationIssue EXCEPTION;
     cnt number;
     errM varchar2(255);
-
   begin
     select count(*) into cnt from app_users au where au.emp_id = pmng_id;
-
     if (cnt = 1) then
       update requests rq
              set rq.res_user  = pmng_id,
@@ -175,22 +144,17 @@ create or replace package body TM_UTILS as
                  rq.rejected   = 'N',
                  rq.status = 'RESOLVED'
            where rq.id = pid_req;
-
       commit;     
     else
       raise userValidationIssue;
-
     end if;
-
   exception
     when userValidationIssue then 
       raise_application_error(-20155, 'Issue with the user that you are validating with, it does not appear');
     when others then 
       errM := substr(sqlerrm, 1, 255);
       raise_application_error(-20155, errM);
-
   end;
-
   
   
   
@@ -202,21 +166,18 @@ create or replace package body TM_UTILS as
     emp_name varchar2(60);
     
     errm varchar2(255);
-
   begin
     -- select name of employee 
     SELECT f_name || ' ' || l_name
       into emp_name
       from employees emp
      where emp.emp_id = pemp_id;
-
     -- check if manager is his manager 
     select count(*)
       into cnt
       from employees emp
      where emp.emp_id = pemp_id
        and emp.tm_id = pmng_id;
-
     if(cnt = 1 ) then
       update requests rq
          set rq.res_user = pmng_id,
@@ -224,14 +185,11 @@ create or replace package body TM_UTILS as
              rq.rejected = 'N',
              rq.status   = 'RESOLVED'
        where rq.id = pid_req;
-
       commit;      
     elsif(cnt = 0) then
       raise NOT_MY_MANAGER;
-
     else  
       raise EMPLOYEE_ISSUE;
-
     end if;  
   EXCEPTION
     when EMPLOYEE_ISSUE then 
@@ -242,7 +200,6 @@ create or replace package body TM_UTILS as
       errM := substr(sqlerrm, 1, 255);
       raise_application_error(-20155, errM);     
   end;
-
 
   
   -- Resolves all requests based on submission date and does not allow any overlap
@@ -255,10 +212,9 @@ create or replace package body TM_UTILS as
     
     MIN_REQUIREMENTS EXCEPTION;
     errm varchar2(255);
-
   BEGIN 
    -- minimum requirements check
-    select count(rq.id)
+/*    select count(rq.id)
       into min_req_cnt
       from requests rq
       join status_types st
@@ -267,12 +223,14 @@ create or replace package body TM_UTILS as
        and st.final = 'N'
        and st.active = 'D'
        and rq.dept_id = (select dept_id from requests rq where rq.id = preq_id);
-
       
     if min_req_cnt != 1 then 
       raise MIN_REQUIREMENTS;
-    end if;      
-   
+    end if; */     
+    
+    -- The Above requeirements will go in a trigger    
+
+
     select count(rq.id)
       into no_of_overlaps
       from requests rq
@@ -280,14 +238,13 @@ create or replace package body TM_UTILS as
        and trunc(rq.end_date) >= trunc(pstart_date)
        and rq.resolved = 'D'
        and rq.status = 'RESOLVED'
+       and rq.type_of_req = 'VACATION_LEAVE'
        and rq.res_user is not null
        and rq.id != preq_id;
-
     if no_of_overlaps >  pmax_overlap then 
       return false;
     else 
       return true;
-
     end if;  
 
   EXCEPTION
@@ -295,13 +252,13 @@ create or replace package body TM_UTILS as
       errM := substr(sqlerrm, 1, 255);
       raise_application_error(-20155, errM);     
   END;
+  
+  
 
-  
-  
   
   procedure Smart_Validation(pstart_date date, pend_date date, paccepted_overlap number, prule number, pmng_id number) as
    /* cursor used for getting all the requests for vacation_leave in department */
-    cursor c_get_pendic_vacation is 
+    cursor c_pending_req_1 is 
       select rq.*, emp.f_name || ' ' || emp.l_name "FULL_NAME"
         from requests rq
         join employees emp
@@ -312,19 +269,52 @@ create or replace package body TM_UTILS as
          and rq.dept_id in (select dp.dep_id from departments dp where dp.tm_id = pmng_id)
          and trunc(rq.start_date) <= trunc(pend_date)
          and trunc(rq.end_date) >= trunc(pstart_date)
-       order by rq.SUBMITION_DATE desc;
-
-          errm varchar2(255);       
-    gpv c_get_pendic_vacation%rowtype;
+       order by rq.SUBMITION_DATE desc;     
+    gpv c_pending_req_1%rowtype;
+    
+    -- rule 2 cursor
+    cursor c_pending_req_2 is 
+      select rq.*,
+             emp.f_name || ' ' || emp.l_name "FULL_NAME",
+             (select sum(rq2.total_no_of_days)
+                from requests rq2
+               where rq2.emp_id = rq.emp_id
+                 and rq2.dept_id = rq.dept_id
+                 and rq2.status <> 'REJECTED'
+                 and extract(YEAR FROM rq.start_date) =
+                     extract(YEAR from sysdate)
+                 and rq2.rejected = 'N'
+                 and rq2.rejected_user is null
+                 and rq2.type_of_req = 'VACATION_LEAVE') "TAKEN_DAYS"
+        from requests rq
+        join employees emp
+          on emp.emp_id = rq.emp_id
+         and emp.dep_id = rq.dept_id
+       where rq.type_of_req = 'VACATION_LEAVE'
+         and rq.status = 'SUBMITTED'
+         and rq.dept_id in
+             (select dp.dep_id from departments dp where dp.tm_id = pmng_id)
+         and trunc(rq.start_date) <= trunc(pend_date)
+         and trunc(rq.end_date) >= trunc(pstart_date)
+       order by TAKEN_DAYS, rq.SUBMITION_DATE desc;
+            
+    errm varchar2(255);   
+    gpr c_pending_req_2%rowtype;
+    
+      
     under_review boolean;
-    
-        
+    -- Types for rule 1
     type  int_number is record (req_id number);
-
     type int_table is table of int_number index by PLS_INTEGER; 
-    
+   
     selected_req int_number;
-    req_on_same_day int_table;          
+    req_on_same_day int_table;   
+    -- Types for rule 2 
+    type taken_days is record(taken_days number);
+    type taken_table is table of taken_days;     
+    
+    same_taken_days taken_table;
+ 
   begin
     -- Initializing working variables
     under_review := false;
@@ -342,21 +332,22 @@ create or replace package body TM_UTILS as
                                     and rq.status = 'SUBMITTED'
                                   group by rq.submition_date
                                  having count(*) > 1);
-
     -- RULE 1 is FirstComeFirstServed
     -- RULE 2 is based on which person has taken the most days
     if(prule = 1) then 
-      open c_get_pendic_vacation;
+      open c_pending_req_1;
       <<main_loop>>
       loop
-        fetch c_get_pendic_vacation into gpv;
-        exit when c_get_pendic_vacation%notfound;
+        fetch c_pending_req_1 into gpv;
+        exit when c_pending_req_1%notfound;
         -- we check the req made on the same day
         
-        -- This is currently not working on this version of DB -> No Map method found for decalre Type
+        -- This is currently not working on this version of DB -> No Map method found for decalred Type !!!
 /*      if (selected_req member of req_on_same_day) then 
           dbms_output.put(' -----> Marked for review');
         end if;*/  
+        
+        under_review := false;
         <<same_day_req>>
         for x in req_on_same_day.FIRST .. req_on_same_day.LAST loop
           exit same_day_req when req_on_same_day.count = 0;
@@ -364,33 +355,86 @@ create or replace package body TM_UTILS as
             under_review := true;
             exit same_day_req;
           end if;
-
-        end loop;        
+        end loop;    
         if (under_review) then 
           -- we mark the request for review and continue to next iterration
           mark_for_review(preq_id => gpv.id , pemp_id => gpv.emp_id , pmng_id => pmng_id);
-          CONTINUE;
+          CONTINUE;          
         end if;
-
-          
+                  
         -- we go through each request and check if they violate the no overlap rule
         if(can_approve_request(paccepted_overlap, pstart_date, pend_date, gpv.id)) then 
           direct_validation(gpv.id, gpv.emp_id, pmng_id);
         else 
-          direct_rejection(gpv.id, gpv.emp_id, pmng_id);
-
+          direct_rejection(gpv.id, pmng_id);
         end if;
-
         
       end loop;
-
-    close c_get_pendic_vacation;
+      close c_pending_req_1;
     elsif prule = 2 then
-      dbms_output.put_line('Wait for your turn rule implementation');
+      -- we get all the number of taken days that appear more than once 
+      -- and exlude the requests with the employee that has that number of taken days 
+      select  same_number.taken_days bulk collect into same_taken_days from (select distinct rq.emp_id,
+               (select sum(rq2.total_no_of_days)
+                  from requests rq2
+                 where rq2.emp_id = rq.emp_id
+                   and rq2.dept_id = rq.dept_id
+                   and rq2.status <> 'REJECTED'
+                   and extract(YEAR FROM rq2.start_date) =
+                       extract(YEAR from sysdate)
+                   and rq2.rejected = 'N'
+                   and rq2.rejected_user is null
+                   and rq2.type_of_req = 'VACATION_LEAVE') "TAKEN_DAYS"
+          from requests rq
+          join employees emp
+            on emp.emp_id = rq.emp_id
+           and emp.dep_id = rq.dept_id
+         where rq.type_of_req = 'VACATION_LEAVE'
+           and rq.status = 'SUBMITTED'
+           and rq.dept_id in
+               (select dp.dep_id from departments dp where dp.tm_id = 1)
+           and trunc(rq.start_date) <= trunc(pend_date)
+           and trunc(rq.end_date) >= trunc(pstart_date)
+         order by TAKEN_DAYS desc)  same_number  
+       having  count(same_number.taken_Days) > 1 group by same_number.taken_days;
       
-      -- potential conflicts : if same number of taken days then we apply rule of first come first served 
+      dbms_output.put_line('Wait for your turn rule implementation');
+      -- This rule will not take into consideration remaining days only days taken
+      -- potential conflicts : if same number of taken days then they will be marked for review 
+      open c_pending_req_2;
+      <<main_loop>>
+      loop
+        -- we reinitialize the marker for the next request 
+        under_review := false;
+       
+        fetch c_pending_req_2 into gpr;
+        exit when c_pending_req_2%notfound;
+        -- now we need to check if the employee has the number of days identified as appearing more than twice  
+        <<same_taken_days_loop>>
+        for x in same_taken_days.FIRST .. same_taken_days.LAST loop
+          exit  when same_taken_days.count = 0;
+          if gpr.taken_days = same_taken_days(x).taken_days then 
+            
+            under_review := true;
+            exit same_taken_days_loop;
+          end if;
+        end loop;           
+        if (under_review) then 
+          -- we mark the request for review and continue to next iterration
+          mark_for_review(preq_id => gpr.id , pemp_id => gpr.emp_id , pmng_id => pmng_id);
+          CONTINUE;          
+        end if;
+          
+        -- we go through each request that passed the under review flag and check if they violate the no overlap rule
+        if(can_approve_request(paccepted_overlap, pstart_date, pend_date, gpr.id)) then 
+          direct_validation(gpr.id, gpr.emp_id, pmng_id);
+        else 
+          direct_rejection(gpr.id, pmng_id);
+        end if;
+        
+      end loop;        
+      close c_pending_req_2;
     end if;
-
     
   EXCEPTION  
     when others then 
@@ -398,14 +442,26 @@ create or replace package body TM_UTILS as
       raise_application_error(-20155, errM);       
   end;
 
-
   -- passing attributions to another TM
-  procedure Pass_Attributions(pempl_id number, ptm_target varchar2) as
-    
+  procedure Pass_Attributions(pgiver number, preceiver number, pdept_id number) as
+    -- we need to insert the record in the appropriate table
+    -- and modify the tm_id in departments
+    errm varchar2(250);
   begin
-    null;
+    -- register the transfer
+    insert into passed_attributions(giver_id, department_id, receiver_id) 
+      values(pgiver, pdept_id, preceiver);
+    update departments dp 
+      set dp.tm_id = preceiver
+      where dp.dep_id = pdept_id;
+    commit;  
+    -- change the department id 
+  EXCEPTION
+    when others then 
+      rollback;
+      errm := substr(sqlerrm, 1, 255);
+      raise_application_error(-20150, errm);
   end;
-
   
   procedure Bulk_Validation(pall_these_req bulk_requests_array) as 
     errm varchar2(255); 
@@ -415,13 +471,11 @@ create or replace package body TM_UTILS as
       
       direct_validation(pall_these_req(x).req_id, pall_these_req(x).emp_id, pall_these_req(x).mng_id);
     end loop;
-
   
   EXCEPTION
     when others then 
       errM := substr(sqlerrm, 1, 255);
       raise_application_error(-20155, errM);     
   END;
-
   
 end TM_UTILS;

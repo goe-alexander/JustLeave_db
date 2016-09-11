@@ -21,9 +21,9 @@ create table user_credentials(
 ); 
 
 create table user_atributions(
-  emp_id number(10),
+  acc_id number(10),
   role_id number(10),
-  foreign key (emp_id) references employees(emp_id),
+  foreign key (acc_id) references app_users(eid),
   foreign key (role_id) references role_types(role_id),
   constraint pk primary key (emp_id, role_id) 
 );
@@ -52,7 +52,7 @@ create table user_accounts(
 
 create table requests(
   id number(10),
-  type_of_req varchar2(60),
+  type_of_req varchar2(60) not null,
   Status varchar2(60),
   submition_date date, 
   emp_id number, -- initiator
@@ -159,8 +159,9 @@ create table employees(
 create table departments(
   dep_id number(18) primary key,
   code varchar2(60),
+  description varchar2(60),
   active varchar2(1) default null,
-  no_of_emplyees varchar2(60),
+  no_of_emplyees number(30),
   no_of_main_emp number(30),
   no_of_res number(30),
   tm_id number(30),
@@ -209,9 +210,36 @@ create table sl_errors(
   constraint cor_err_pk primary key(cod_err) 
 );
 
-create table year_remaining_days(
+create table restant_days(
   empl_id number, 
   remaining_days number, 
   remaining_year varchar2(10), 
   constraint uq_row unique (empl_id, remaining_days, remaining_year)
+);
+
+create table passed_attributions(
+  giver_id number,
+  department_id number, 
+  receiver_id number,
+  accepted varchar2(1) default 'N',
+  constraint fk_giver_id foreign key(giver_id) references employees(emp_id),
+  constraint fk_receiver_id foreign key(receiver_id) references employees(emp_id),
+  constraint fk_department_id foreign key(department_id) references departments(dep_id),
+  constraint chck_accepted check  (accepted in ('D', 'N'))_,
+  constraint uk_composite_key unique (giver_id, department_id, receiver_id)
+);
+
+create table skill_matrix(
+  emp_id number,
+  skill varchar2(60),
+  lvl number,
+  constraint fk_emp_id_skMatrix foreign key(emp_id) references employees(emp_id),
+  constraint fk_skill_code foreign key(skill) references skill_types(skill_code),
+  constraint chck_lvl_values check (lvl in (1, 2, 3, 4, 5 )) 
+);
+
+
+create table skill_types(
+  skill_code varchar2(60) primary key,
+  skill_description varchar2(80)
 );
