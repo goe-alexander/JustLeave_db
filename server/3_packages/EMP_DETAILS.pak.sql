@@ -2,6 +2,8 @@ create or replace package EMP_details as
   procedure get_emp_details(p_acc_name in varchar2, p_emp_out out emp_details_type);
   -- we create another procedure to check the users role
   procedure get_users_role(papp_user_code varchar2, out_usr_role out varchar2);
+  procedure give_skill(pemp_id number, pskill_id number, plevel number);
+  procedure define_skill(pskill_code varchar2, pskill_description varchar2);
 end EMP_details;
 
 create or replace package body EMP_details as
@@ -31,7 +33,7 @@ create or replace package body EMP_details as
   end;
 
 
-  --This procedure will return the users role in thlogin backing bean
+  --This procedure will return the users role in the login backing bean
   -- immediately after validating login credentials
 
   procedure get_users_role(papp_user_code varchar2, out_usr_role out varchar2) as
@@ -59,4 +61,31 @@ create or replace package body EMP_details as
       errm := substr(sqlerrm, 1, 250);
       out_usr_role := 'Issue in determining role: ' || errm;
   end;
+  
+  -- theese two procedures will be used only from within sql. 
+  -- 
+  procedure give_skill(pemp_id number, pskill_id number, plevel number) as
+    errm varchar2(255);  
+  BEGIN 
+    insert into skill_matrix(emp_id, skill, lvl) values(pemp_id, pskill_id, plevel); 
+    commit;
+  EXCEPTION
+    when others then 
+      rollback;
+      errm := substr(sqlerrm, 1, 255);
+      raise_application_error(-20155, errm);
+  END;
+  
+  procedure define_skill(pskill_code varchar2, pskill_description varchar2) as
+    errm varchar2(255);
+  BEGIN
+
+    insert into skill_types(skill_code, skill_description) values (pskill_code, pskill_description);
+    commit;
+  EXCEPTION 
+    when others then 
+      rollback;
+      errm := substr(sqlerrm, 1, 255);
+      raise_application_error(-20155, errm);
+  END;
 end  EMP_details;

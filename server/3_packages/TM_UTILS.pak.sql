@@ -1,16 +1,20 @@
 create or replace package TM_UTILS as
-
+ 
+  procedure mark_for_review(preq_id number, pemp_id number, pmng_id number);
+  procedure direct_rejection(preq_id number, pmng_id number);
   --- checks for overlapps and if there are none then validates
   procedure check_validate_request(pid_req number, pmng_id number);
-
+  
   -- Does not check for overlap, assumes the TM has gone ahead and approved the request
   procedure validate_request(pid_req number, pmng_id number);
-  procedure Smart_Validation(pid_dept number, pMng_id number);
+  procedure Smart_Validation(pstart_date date, pend_date date, paccepted_overlap number, prule number, pmng_id number);
   
   procedure Bulk_Validation(pall_these_req bulk_requests_array);
   -- passing attributions to another TM
-  procedure Pass_Attributions(pempl_id number, ptm_target varchar2);
+  procedure Pass_Attributions(pgiver number, preceiver number, pdept_id number);
 end TM_UTILS;
+
+
 create or replace package body TM_UTILS as
   
   procedure mark_for_review(preq_id number, pemp_id number, pmng_id number) as 
@@ -451,9 +455,7 @@ create or replace package body TM_UTILS as
     -- register the transfer
     insert into passed_attributions(giver_id, department_id, receiver_id) 
       values(pgiver, pdept_id, preceiver);
-    update departments dp 
-      set dp.tm_id = preceiver
-      where dp.dep_id = pdept_id;
+    -- 
     commit;  
     -- change the department id 
   EXCEPTION
